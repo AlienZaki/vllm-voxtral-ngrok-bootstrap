@@ -226,4 +226,10 @@ echo
 echo "Quick test after URL appears:"
 echo '  curl -X POST "$(./tunnel_url.sh)/v1/chat/completions" \'
 echo '    -H "Content-Type: application/json" \'
-echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\' 
+echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\'
+
+# =======================
+# Print ngrok public URL
+# =======================
+echo "[*] Fetching ngrok public URL..."
+bash ~/voxtral/tunnel_url.sh
