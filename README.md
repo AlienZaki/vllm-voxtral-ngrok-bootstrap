@@ -14,6 +14,14 @@ Bootstrap a local vLLM server for the Voxtral Mini model and expose it securely 
 - Non-root user with sudo privileges.
 - ngrok auth token.
 
+## Clone the Repository
+To get started, clone this repository:
+
+```sh
+git clone https://github.com/AlienZaki/vllm-voxtral-ngrok-bootstrap.git
+cd vllm-voxtral-ngrok-bootstrap
+```
+
 ## Quick start
 ```sh
 chmod +x bootstrap.sh
