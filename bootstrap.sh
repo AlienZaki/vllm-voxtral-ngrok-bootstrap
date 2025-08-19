@@ -71,7 +71,6 @@ uv pip install --upgrade "vllm[audio]"
 python -c "import mistral_common; print('mistral_common version:', getattr(mistral_common, '__version__', 'unknown'))"
 uv pip install --upgrade "mistral_common[audio]" soundfile
 
-
 python - <<'PY'
 from mistral_common.protocol.instruct.messages import TextChunk, AudioChunk, UserMessage, AssistantMessage
 from mistral_common.audio import Audio
@@ -116,7 +115,7 @@ if [[ -x /snap/bin/ngrok && ! -x /usr/local/bin/ngrok ]]; then
 fi
 
 # =======================
-# .env for services
+# .env for services (keep PORT/MODEL for vLLM)
 # =======================
 touch "$ENV_FILE"
 grep -q '^PORT=' "$ENV_FILE"   || echo "PORT=$PORT" >> "$ENV_FILE"
@@ -147,10 +146,16 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# systemd unit: ngrok (anonymous mode)
+# systemd unit: ngrok template (anonymous mode, uses %i)
 # =======================
-NGROK_SERVICE_PATH="/etc/systemd/system/ngrok-http@$PORT.service"
-sudo bash -c "cat > '$NGROK_SERVICE_PATH'" <<'SERVICE'
+# Remove any stale per-port unit that would shadow the template
+if [[ -f "/etc/systemd/system/ngrok-http@${PORT}.service" ]]; then
+  sudo systemctl disable --now "ngrok-http@${PORT}" || true
+  sudo rm -f "/etc/systemd/system/ngrok-http@${PORT}.service"
+fi
+
+NGROK_TEMPLATE="/etc/systemd/system/ngrok-http@.service"
+sudo bash -c "cat > '$NGROK_TEMPLATE'" <<'SERVICE'
 [Unit]
 Description=ngrok HTTP tunnel on port %i
 After=network-online.target vllm.service
@@ -159,8 +164,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=PATH=/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-EnvironmentFile=/home/%u/voxtral/.env
-ExecStart=/usr/bin/env ngrok http ${PORT}
+# No EnvironmentFile and no ${PORT}; %i is the instance port
+ExecStart=/usr/bin/env ngrok http %i --log=stdout --log-format=logfmt
 Restart=always
 RestartSec=2
 
@@ -168,24 +173,23 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICE
 
-# Replace %u placeholder with actual user path to .env
-sudo sed -i "s|/home/%u/voxtral/.env|$APP_DIR/.env|" "$NGROK_SERVICE_PATH"
-
 # =======================
-# Helper: print tunnel URL
+# Helper: print tunnel URL (API with wait)
 # =======================
 URL_SCRIPT="$APP_DIR/tunnel_url.sh"
 cat > "$URL_SCRIPT" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-# Wait up to ~30s for ngrok API
+# Wait up to ~30s for ngrok inspector API
 for _ in {1..30}; do
   if curl -fsS http://127.0.0.1:4040/api/tunnels >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-curl -fsS http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -n1
+curl -fsS http://127.0.0.1:4040/api/tunnels \
+  | jq -r '.tunnels[] | select(.proto=="https") | .public_url' \
+  | head -n1
 SH
 chmod +x "$URL_SCRIPT"
 
@@ -195,21 +199,21 @@ chmod +x "$URL_SCRIPT"
 echo "[*] Enabling and starting services..."
 sudo systemctl daemon-reload
 sudo systemctl enable --now vllm.service
-sudo systemctl enable --now "ngrok-http@$PORT.service"
+sudo systemctl enable --now "ngrok-http@${PORT}.service"
 
 echo
 echo "✅ All set."
 echo "vLLM status:     sudo systemctl status vllm --no-pager"
-echo "ngrok status:    sudo systemctl status ngrok-http@$PORT --no-pager"
+echo "ngrok status:    sudo systemctl status ngrok-http@${PORT} --no-pager"
 echo "Public URL:      $URL_SCRIPT"
 echo
 echo "Quick test after URL appears:"
 echo '  curl -X POST "$(./tunnel_url.sh)/v1/chat/completions" \'
 echo '    -H "Content-Type: application/json" \'
-echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\' 
+echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\'
 
 # =======================
 # Print ngrok public URL
 # =======================
 echo "[*] Fetching ngrok public URL..."
-bash ~/voxtral/tunnel_url.sh
+bash "$URL_SCRIPT"
