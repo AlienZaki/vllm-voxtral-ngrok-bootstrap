@@ -17,7 +17,7 @@ APP_DIR="$HOME_DIR/voxtral"
 ENV_FILE="$APP_DIR/.env"
 
 if [[ "$ME" == "root" ]]; then
-  echo "Please run this script as a normal user (not root)."
+  echo "Please run this script as a normal user (not root)." >&2
   exit 1
 fi
 
@@ -36,10 +36,10 @@ echo "[*] Installing base packages..."
 sudo apt-get update -y
 sudo apt-get install -y curl ca-certificates gnupg python3 python3-venv python3-pip jq
 
-# Ensure ~/.local/bin is on PATH
+# Ensure ~/.local/bin on PATH for this user
 mkdir -p "$HOME_DIR/.local/bin"
-if ! grep -q 'export PATH="$HOME_DIR/.local/bin:$PATH"' "$HOME_DIR/.bashrc"; then
-  echo 'export PATH="$HOME_DIR/.local/bin:$PATH"' >> "$HOME_DIR/.bashrc"
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$HOME_DIR/.bashrc"; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME_DIR/.bashrc"
 fi
 export PATH="$HOME_DIR/.local/bin:$PATH"
 
@@ -78,7 +78,7 @@ from mistral_common.audio import Audio
 print("All imports successful")
 PY
 
-# Sometimes ~/.config ends up root-owned (fix quietly)
+# Fix ~/.config ownership if needed
 sudo chown -R "$ME:$ME" "$HOME_DIR/.config" || true
 
 # =======================
@@ -110,17 +110,18 @@ NGROK_BIN="$(command -v ngrok || true)"
 if [[ -z "$NGROK_BIN" && -x /snap/bin/ngrok ]]; then
   NGROK_BIN="/snap/bin/ngrok"
 fi
+# Optional convenience symlink when using snap
 if [[ -x /snap/bin/ngrok && ! -x /usr/local/bin/ngrok ]]; then
   sudo ln -sf /snap/bin/ngrok /usr/local/bin/ngrok || true
 fi
 
 # =======================
-# Configure ngrok token
+# Configure ngrok token (required by ngrok v3)
 # =======================
 if [[ -z "$NGROK_TOKEN" ]]; then
-  read -rp "Enter your NGROK_TOKEN (from https://dashboard.ngrok.com/get-started/your-authtoken): " NGROK_TOKEN
+  read -rp "Enter your NGROK_TOKEN (https://dashboard.ngrok.com/get-started/your-authtoken): " NGROK_TOKEN
 fi
-"$NGROK_BIN" config add-authtoken "$NGROK_TOKEN" || true
+"$NGROK_BIN" config add-authtoken "$NGROK_TOKEN" || true  # idempotent
 
 # =======================
 # .env for vLLM only
@@ -154,15 +155,16 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# systemd unit: ngrok template (uses %i, token already in config)
+# systemd unit: ngrok template (uses %i, runs as current user)
 # =======================
+# Remove any stale per-port unit that would shadow the template
 if [[ -f "/etc/systemd/system/ngrok-http@${PORT}.service" ]]; then
   sudo systemctl disable --now "ngrok-http@${PORT}" || true
   sudo rm -f "/etc/systemd/system/ngrok-http@${PORT}.service"
 fi
 
 NGROK_TEMPLATE="/etc/systemd/system/ngrok-http@.service"
-sudo bash -c "cat > '$NGROK_TEMPLATE'" <<'SERVICE'
+sudo bash -c "cat > '$NGROK_TEMPLATE'" <<SERVICE
 [Unit]
 Description=ngrok HTTP tunnel on port %i
 After=network-online.target vllm.service
@@ -170,7 +172,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
+User=$ME
 Environment=PATH=/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/env ngrok http %i --log=stdout --log-format=logfmt
 Restart=always
@@ -181,21 +183,27 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# Helper: print tunnel URL
+# Helper: print tunnel URL (API first, logs fallback)
 # =======================
 URL_SCRIPT="$APP_DIR/tunnel_url.sh"
 cat > "$URL_SCRIPT" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+# Try inspector API (wait up to ~30s)
 for _ in {1..30}; do
   if curl -fsS http://127.0.0.1:4040/api/tunnels >/dev/null 2>&1; then
-    break
+    URL="$(curl -fsS http://127.0.0.1:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -n1)"
+    if [[ -n "${URL:-}" ]]; then
+      echo "$URL"; exit 0
+    fi
   fi
   sleep 1
 done
-curl -fsS http://127.0.0.1:4040/api/tunnels \
-  | jq -r '.tunnels[] | select(.proto=="https") | .public_url' \
-  | head -n1
+# Fallback: scrape systemd logs
+URL="$(journalctl -u ngrok-http@'"$PORT"' --no-pager | grep -Eo 'https://[a-z0-9.-]+\.ngrok[^ ]*' | tail -n1 || true)"
+if [[ -n "${URL:-}" ]]; then echo "$URL"; exit 0; fi
+echo "No ngrok URL found yet. Check: sudo systemctl status ngrok-http@'"$PORT"' and journalctl -u ngrok-http@'"$PORT" >&2
+exit 1
 SH
 chmod +x "$URL_SCRIPT"
 
