@@ -6,7 +6,6 @@ set -euo pipefail
 # =======================
 MODEL="${MODEL:-mistralai/Voxtral-Mini-3B-2507}"
 PORT="${PORT:-8000}"
-NGROK_TOKEN="${NGROK_TOKEN:-}"
 
 # =======================
 # Detect user / env
@@ -122,18 +121,6 @@ touch "$ENV_FILE"
 grep -q '^PORT=' "$ENV_FILE"   || echo "PORT=$PORT" >> "$ENV_FILE"
 grep -q '^MODEL=' "$ENV_FILE"  || echo "MODEL=$MODEL" >> "$ENV_FILE"
 
-if [[ -z "$NGROK_TOKEN" ]]; then
-  read -rp "Enter your NGROK_AUTHTOKEN: " NGROK_TOKEN
-fi
-if grep -q '^NGROK_AUTHTOKEN=' "$ENV_FILE"; then
-  sed -i "s|^NGROK_AUTHTOKEN=.*|NGROK_AUTHTOKEN=$NGROK_TOKEN|" "$ENV_FILE"
-else
-  echo "NGROK_AUTHTOKEN=$NGROK_TOKEN" >> "$ENV_FILE"
-fi
-
-# Also write a local ngrok config (idempotent)
-"$NGROK_BIN" config add-authtoken "$NGROK_TOKEN" || ngrok config add-authtoken "$NGROK_TOKEN" || true
-
 # =======================
 # systemd unit: vLLM
 # =======================
@@ -159,7 +146,7 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# systemd unit: ngrok (path-agnostic, snap-friendly)
+# systemd unit: ngrok (anonymous mode)
 # =======================
 NGROK_SERVICE_PATH="/etc/systemd/system/ngrok-http@$PORT.service"
 sudo bash -c "cat > '$NGROK_SERVICE_PATH'" <<'SERVICE'
@@ -170,12 +157,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Ensure snap binaries and common paths are visible to systemd service
 Environment=PATH=/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Load PORT and NGROK_AUTHTOKEN from app .env
 EnvironmentFile=/home/%u/voxtral/.env
-# Use /usr/bin/env to resolve ngrok (APT or snap) at runtime
-ExecStartPre=/usr/bin/env ngrok config add-authtoken ${NGROK_AUTHTOKEN}
 ExecStart=/usr/bin/env ngrok http ${PORT}
 Restart=always
 RestartSec=2
@@ -211,11 +194,7 @@ chmod +x "$URL_SCRIPT"
 echo "[*] Enabling and starting services..."
 sudo systemctl daemon-reload
 sudo systemctl enable --now vllm.service
-sudo systemctl enable --now "ngrok-http@$PORT.service" || {
-  echo "[!] ngrok service failed to start, attempting a manual token setup + restart..."
-  /usr/bin/env ngrok config add-authtoken "$NGROK_TOKEN" || true
-  sudo systemctl restart "ngrok-http@$PORT.service"
-}
+sudo systemctl enable --now "ngrok-http@$PORT.service"
 
 echo
 echo "✅ All set."
@@ -226,7 +205,7 @@ echo
 echo "Quick test after URL appears:"
 echo '  curl -X POST "$(./tunnel_url.sh)/v1/chat/completions" \'
 echo '    -H "Content-Type: application/json" \'
-echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\'
+echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\' 
 
 # =======================
 # Print ngrok public URL
