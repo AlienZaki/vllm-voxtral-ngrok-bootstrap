@@ -69,7 +69,8 @@ source .venv/bin/activate
 echo "[*] Installing Python deps..."
 uv pip install --upgrade "vllm[audio]"
 python -c "import mistral_common; print('mistral_common version:', getattr(mistral_common, '__version__', 'unknown'))"
-uv pip install --upgrade "mistral_common[audio]"
+uv pip install --upgrade "mistral_common[audio]" soundfile
+
 
 python - <<'PY'
 from mistral_common.protocol.instruct.messages import TextChunk, AudioChunk, UserMessage, AssistantMessage
