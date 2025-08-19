@@ -21,6 +21,11 @@ if [[ "$ME" == "root" ]]; then
   exit 1
 fi
 
+# --- Pre-clean any bad ngrok APT source so apt update won’t fail ---
+if [[ -f /etc/apt/sources.list.d/ngrok.list ]]; then
+  sudo rm -f /etc/apt/sources.list.d/ngrok.list
+fi
+
 # Ensure sudo available
 if ! command -v sudo >/dev/null 2>&1; then
   echo "[*] Installing sudo..."
@@ -90,17 +95,22 @@ if ! command -v ngrok >/dev/null 2>&1; then
   set -e
   if [[ $APT_RC -ne 0 ]]; then
     echo "[!] APT install failed, falling back to snap..."
-    sudo snap install ngrok
+    if command -v snap >/dev/null 2>&1; then
+      sudo snap install ngrok
+    else
+      echo "[!] snapd not found; installing snapd..."
+      sudo apt-get install -y snapd
+      sudo snap install ngrok
+    fi
   fi
 fi
 
-# If ngrok came from snap, make sure /snap/bin is reachable by services
+# Resolve ngrok binary path (APT or snap)
 NGROK_BIN="$(command -v ngrok || true)"
-if [[ -z "$NGROK_BIN" ]] && [[ -x /snap/bin/ngrok ]]; then
+if [[ -z "$NGROK_BIN" && -x /snap/bin/ngrok ]]; then
   NGROK_BIN="/snap/bin/ngrok"
 fi
-
-# Optionally symlink for convenience (doesn't hurt if APT was used)
+# Optional convenience symlink when using snap
 if [[ -x /snap/bin/ngrok && ! -x /usr/local/bin/ngrok ]]; then
   sudo ln -sf /snap/bin/ngrok /usr/local/bin/ngrok || true
 fi
@@ -121,7 +131,7 @@ else
   echo "NGROK_AUTHTOKEN=$NGROK_TOKEN" >> "$ENV_FILE"
 fi
 
-# Also write a local ngrok config in the user profile (idempotent)
+# Also write a local ngrok config (idempotent)
 "$NGROK_BIN" config add-authtoken "$NGROK_TOKEN" || ngrok config add-authtoken "$NGROK_TOKEN" || true
 
 # =======================
@@ -174,8 +184,7 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICE
 
-# We need to replace %u in EnvironmentFile path with actual user, since we used a literal file above.
-# (Some systems support %u, but we ensure correctness by rewriting here.)
+# Replace %u placeholder with actual user path to .env
 sudo sed -i "s|/home/%u/voxtral/.env|$APP_DIR/.env|" "$NGROK_SERVICE_PATH"
 
 # =======================
@@ -217,4 +226,4 @@ echo
 echo "Quick test after URL appears:"
 echo '  curl -X POST "$(./tunnel_url.sh)/v1/chat/completions" \'
 echo '    -H "Content-Type: application/json" \'
-echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\'
+echo '    -d '\''{"model":"mistralai/Voxtral-Mini-3B-2507","messages":[{"role":"user","content":"Hello!"}]}'\' 
