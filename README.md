@@ -24,11 +24,7 @@ cd vllm-voxtral-ngrok-bootstrap
 
 ## Quick start
 ```sh
-chmod +x bootstrap.sh
-# Option A: provide token via env
-NGROK_TOKEN=YOUR_TOKEN ./bootstrap.sh
-# Option B: run and paste the token when prompted
-./bootstrap.sh
+bash bootstrap.sh
 ```
 
 ## Usage
@@ -37,29 +33,25 @@ NGROK_TOKEN=YOUR_TOKEN ./bootstrap.sh
 Run the `bootstrap.sh` script to set up the environment, install dependencies, and configure services.
 
 ```sh
-chmod +x bootstrap.sh
-# Option A: provide token via env
-NGROK_TOKEN=YOUR_TOKEN ./bootstrap.sh
-# Option B: run and paste the token when prompted
-./bootstrap.sh
+bash bootstrap.sh
 ```
 
 ### Teardown the Environment
 Run the `teardown.sh` script to clean up the setup, stop services, and optionally remove all related files.
 
 ```sh
-chmod +x teardown.sh
+bash teardown.sh
 # Basic teardown
-./teardown.sh
+bash teardown.sh
 
 # Teardown without confirmation
-./teardown.sh --yes
+bash teardown.sh --yes
 
 # Keep application data
-./teardown.sh --keep-data
+bash teardown.sh --keep-data
 
 # Purge ngrok installation
-./teardown.sh --purge
+bash teardown.sh --purge
 ```
 
 ### Get the Public URL
