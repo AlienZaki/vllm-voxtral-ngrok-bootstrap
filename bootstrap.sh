@@ -6,6 +6,7 @@ set -euo pipefail
 # =======================
 MODEL="${MODEL:-mistralai/Voxtral-Mini-3B-2507}"
 PORT="${PORT:-8000}"
+NGROK_TOKEN="${NGROK_TOKEN:-}"
 
 # =======================
 # Detect user / env
@@ -37,8 +38,8 @@ sudo apt-get install -y curl ca-certificates gnupg python3 python3-venv python3-
 
 # Ensure ~/.local/bin is on PATH
 mkdir -p "$HOME_DIR/.local/bin"
-if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$HOME_DIR/.bashrc"; then
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME_DIR/.bashrc"
+if ! grep -q 'export PATH="$HOME_DIR/.local/bin:$PATH"' "$HOME_DIR/.bashrc"; then
+  echo 'export PATH="$HOME_DIR/.local/bin:$PATH"' >> "$HOME_DIR/.bashrc"
 fi
 export PATH="$HOME_DIR/.local/bin:$PATH"
 
@@ -109,13 +110,20 @@ NGROK_BIN="$(command -v ngrok || true)"
 if [[ -z "$NGROK_BIN" && -x /snap/bin/ngrok ]]; then
   NGROK_BIN="/snap/bin/ngrok"
 fi
-# Optional convenience symlink when using snap
 if [[ -x /snap/bin/ngrok && ! -x /usr/local/bin/ngrok ]]; then
   sudo ln -sf /snap/bin/ngrok /usr/local/bin/ngrok || true
 fi
 
 # =======================
-# .env for services (keep PORT/MODEL for vLLM)
+# Configure ngrok token
+# =======================
+if [[ -z "$NGROK_TOKEN" ]]; then
+  read -rp "Enter your NGROK_TOKEN (from https://dashboard.ngrok.com/get-started/your-authtoken): " NGROK_TOKEN
+fi
+"$NGROK_BIN" config add-authtoken "$NGROK_TOKEN" || true
+
+# =======================
+# .env for vLLM only
 # =======================
 touch "$ENV_FILE"
 grep -q '^PORT=' "$ENV_FILE"   || echo "PORT=$PORT" >> "$ENV_FILE"
@@ -146,9 +154,8 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# systemd unit: ngrok template (anonymous mode, uses %i)
+# systemd unit: ngrok template (uses %i, token already in config)
 # =======================
-# Remove any stale per-port unit that would shadow the template
 if [[ -f "/etc/systemd/system/ngrok-http@${PORT}.service" ]]; then
   sudo systemctl disable --now "ngrok-http@${PORT}" || true
   sudo rm -f "/etc/systemd/system/ngrok-http@${PORT}.service"
@@ -163,8 +170,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=%i
 Environment=PATH=/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# No EnvironmentFile and no ${PORT}; %i is the instance port
 ExecStart=/usr/bin/env ngrok http %i --log=stdout --log-format=logfmt
 Restart=always
 RestartSec=2
@@ -174,13 +181,12 @@ WantedBy=multi-user.target
 SERVICE
 
 # =======================
-# Helper: print tunnel URL (API with wait)
+# Helper: print tunnel URL
 # =======================
 URL_SCRIPT="$APP_DIR/tunnel_url.sh"
 cat > "$URL_SCRIPT" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-# Wait up to ~30s for ngrok inspector API
 for _ in {1..30}; do
   if curl -fsS http://127.0.0.1:4040/api/tunnels >/dev/null 2>&1; then
     break
