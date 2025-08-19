@@ -23,14 +23,49 @@ NGROK_TOKEN=YOUR_TOKEN ./bootstrap.sh
 ./bootstrap.sh
 ```
 
-## Get the public URL
+## Usage
+
+### Bootstrap the Environment
+Run the `bootstrap.sh` script to set up the environment, install dependencies, and configure services.
+
+```sh
+chmod +x bootstrap.sh
+# Option A: provide token via env
+NGROK_TOKEN=YOUR_TOKEN ./bootstrap.sh
+# Option B: run and paste the token when prompted
+./bootstrap.sh
+```
+
+### Teardown the Environment
+Run the `teardown.sh` script to clean up the setup, stop services, and optionally remove all related files.
+
+```sh
+chmod +x teardown.sh
+# Basic teardown
+./teardown.sh
+
+# Teardown without confirmation
+./teardown.sh --yes
+
+# Keep application data
+./teardown.sh --keep-data
+
+# Purge ngrok installation
+./teardown.sh --purge
+```
+
+### Get the Public URL
+Retrieve the public HTTPS URL for the vLLM server:
+
 ```sh
 ~/voxtral/tunnel_url.sh
 # Or open in your host browser
 $BROWSER "$(~/voxtral/tunnel_url.sh)"
 ```
 
-## Test the API
+### Test the API
+Send a test request to the vLLM server:
+
 ```sh
 curl -X POST "$(~/voxtral/tunnel_url.sh)/v1/chat/completions" \
   -H "Content-Type: application/json" \
